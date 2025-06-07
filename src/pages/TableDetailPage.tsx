@@ -229,22 +229,38 @@ const TableDetailPage: React.FC = () => {
 
     try {
       console.log(`Masa ${tableId} için yeni sipariş oluşturuluyor`);
+
+      // Önce masa durumunu güncelle, sonra sipariş oluştur
+      if (table) {
+        console.log(`Masa ${tableId} durumu "occupied" olarak güncelleniyor`);
+        await db.tables.update(tableId, { status: "occupied" });
+        setTable({ ...table, status: "occupied" });
+
+        // İşlemin tamamlanması için kısa bir bekleme
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+
       const newOrder = await db.orders.create(tableId);
       console.log(`Yeni sipariş oluşturuldu:`, newOrder);
 
       // Doğrudan aktif siparişi ayarla
       setActiveOrder(newOrder);
 
-      // Masayı "occupied" olarak işaretle
-      if (table) {
-        console.log(`Masa ${tableId} durumu "occupied" olarak güncelleniyor`);
-        await db.tables.update(tableId, { status: "occupied" });
-        setTable({ ...table, status: "occupied" });
-      }
+      // İşlemin tamamlanması için kısa bir bekleme
+      await new Promise((resolve) => setTimeout(resolve, 200));
 
       return newOrder;
     } catch (error) {
       console.error("Sipariş oluşturulurken hata oluştu:", error);
+      // Masa durumunu geri al
+      if (table) {
+        try {
+          console.log("Hata oluştu, masa durumunu resetleme girişimi");
+          await loadTableData(); // Masa durumunu yeniden yükle
+        } catch (resetError) {
+          console.error("Masa durumu resetlenirken hata:", resetError);
+        }
+      }
       throw error; // Hatayı yukarı aktar
     }
   };
@@ -256,21 +272,40 @@ const TableDetailPage: React.FC = () => {
     if (!activeOrder) {
       console.log("Aktif sipariş yok, yeni sipariş oluşturuluyor");
       try {
-        const newOrder = await handleCreateOrder();
-
-        if (!newOrder) {
-          toast.error("Sipariş oluşturulamadı, lütfen tekrar deneyin");
-          return;
-        }
-
-        // Yeni siparişi aktif hale getir
-        setActiveOrder(newOrder);
-
-        // Veritabanı işlemlerinin tamamlanması için kısa bir bekleme
-        await new Promise((resolve) => setTimeout(resolve, 300));
-
-        // Güncel durumu yükle
+        // Önce mevcut durumu kontrol et
         await loadTableData();
+
+        // Tekrar kontrol et, belki veritabanında sipariş vardı
+        if (activeOrder) {
+          console.log("Aktif sipariş zaten varmış, yeni oluşturmuyoruz");
+        } else {
+          // Yeni sipariş oluştur
+          const newOrder = await handleCreateOrder();
+
+          if (!newOrder) {
+            toast.error("Sipariş oluşturulamadı, lütfen tekrar deneyin");
+            return;
+          }
+
+          // Yeni siparişi aktif hale getir
+          setActiveOrder(newOrder);
+
+          // Veritabanı işlemlerinin tamamlanması için daha uzun bir bekleme
+          await new Promise((resolve) => setTimeout(resolve, 500));
+
+          // Güncel durumu yükle
+          await loadTableData();
+
+          // Son bir kontrol daha yap
+          if (!activeOrder) {
+            console.log(
+              "Sipariş oluşturuldu ama activeOrder hala null, manuel olarak ayarlanıyor"
+            );
+            setActiveOrder(newOrder);
+            // Bir bekleme daha
+            await new Promise((resolve) => setTimeout(resolve, 300));
+          }
+        }
       } catch (createError) {
         console.error("Sipariş oluşturulurken hata:", createError);
         toast.error("Sipariş oluşturulamadı, lütfen tekrar deneyin");
@@ -296,11 +331,9 @@ const TableDetailPage: React.FC = () => {
       if (variants.length > 0) {
         // Popup göstermeden ilk varyantı kullan
         await addOrderItem(product, variants[0]);
-        // Başarı mesajı göstermiyoruz
       } else {
         // Varyantı olmayan normal ürün
         await addOrderItem(product);
-        // Başarı mesajı göstermiyoruz
       }
 
       // Verileri sessizce yeniden yükle
@@ -441,7 +474,8 @@ const TableDetailPage: React.FC = () => {
   };
 
   const handleOpenPaymentDialog = () => {
-    const total = calculateTotal();
+    // Genel ödeme için tüm aktif ürünlerin toplamını kullan
+    const total = calculateTotalAll();
     setPaymentAmount(total.toFixed(2));
     setPaymentDialog(true);
   };
@@ -1016,6 +1050,12 @@ const TableDetailPage: React.FC = () => {
                         (item) =>
                           item.status === "active" && item.assignedTo === null
                       )
+                      // Ürünleri createdAt tarihine göre ters sırala (en son eklenen en üstte)
+                      .sort(
+                        (a, b) =>
+                          new Date(b.createdAt).getTime() -
+                          new Date(a.createdAt).getTime()
+                      )
                       .map((item) => (
                         <Paper
                           key={item.id}
@@ -1181,6 +1221,12 @@ const TableDetailPage: React.FC = () => {
                             (item) =>
                               item.status === "active" &&
                               item.assignedTo !== null
+                          )
+                          // Ürünleri createdAt tarihine göre ters sırala (en son eklenen en üstte)
+                          .sort(
+                            (a, b) =>
+                              new Date(b.createdAt).getTime() -
+                              new Date(a.createdAt).getTime()
                           )
                           .map((item) => (
                             <ListItem
@@ -1430,6 +1476,11 @@ const TableDetailPage: React.FC = () => {
       <Dialog open={paymentDialog} onClose={handleClosePaymentDialog}>
         <DialogTitle>Ödeme Al</DialogTitle>
         <DialogContent>
+          <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+            Bu ödeme masadaki ve dağıtımdaki tüm aktif ürünleri kapsamaktadır.
+            Toplam tutar: {calculateTotalAll().toFixed(2)} ₺
+          </Typography>
+
           <TextField
             margin="dense"
             label="Ödeme Tutarı"

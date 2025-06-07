@@ -71,6 +71,44 @@ export interface Payment {
   updatedAt: string;
 }
 
+// Kullanıcı modeli
+export interface User {
+  id: string;
+  username: string;
+  fullName: string;
+  isAdmin: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// İşlem log modeli
+export interface ActivityLog {
+  id: string;
+  timestamp: string;
+  operation: string;
+  details: any;
+  tableId?: string;
+  orderId?: string;
+  userId: string;
+  userName: string;
+}
+
+// Günlük ciro raporu modeli
+export interface DailySalesReport {
+  id: string;
+  date: string; // YYYY-MM-DD formatında tarih
+  totalSales: number; // Toplam satış tutarı
+  totalOrders: number; // Toplam sipariş sayısı
+  salesByMethod: {
+    cash: number;
+    credit_card: number;
+    debit_card: number;
+    other: number;
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
 // Yeni ürün formu için model
 export interface ProductFormData {
   name: string;
@@ -101,6 +139,18 @@ export const PAYMENT_METHODS = [
   { value: "debit_card", label: "Banka Kartı" },
   { value: "other", label: "Diğer" },
 ];
+
+// İşlem türleri için sabitler
+export const OPERATION_TYPES = {
+  ORDER_CREATE: "Sipariş Oluşturma",
+  ORDER_COMPLETE: "Sipariş Tamamlama",
+  ORDER_CANCEL: "Sipariş İptal",
+  PRODUCT_ADD: "Ürün Ekleme",
+  PRODUCT_REMOVE: "Ürün Silme",
+  PAYMENT: "Ödeme Alma",
+  TABLE_STATUS_CHANGE: "Masa Durumu Değişikliği",
+  DISTRIBUTION: "Ürün Dağıtımı",
+};
 
 // JSON dosyaları için tiplemeler
 export interface JsonCategory {

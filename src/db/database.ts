@@ -95,6 +95,55 @@ interface PosDB {
     };
     indexes: { "by-order": string };
   };
+  activityLogs: {
+    key: string;
+    value: {
+      id: string;
+      timestamp: string;
+      operation: string;
+      details: any;
+      tableId?: string;
+      orderId?: string;
+      userId: string;
+      userName: string;
+    };
+    indexes: {
+      "by-date": string;
+      "by-user": string;
+      "by-table": string;
+      "by-order": string;
+    };
+  };
+  dailySalesReports: {
+    key: string;
+    value: {
+      id: string;
+      date: string;
+      totalSales: number;
+      totalOrders: number;
+      salesByMethod: {
+        cash: number;
+        credit_card: number;
+        debit_card: number;
+        other: number;
+      };
+      createdAt: string;
+      updatedAt: string;
+    };
+    indexes: { "by-date": string };
+  };
+  users: {
+    key: string;
+    value: {
+      id: string;
+      username: string;
+      fullName: string;
+      isAdmin: boolean;
+      createdAt: string;
+      updatedAt: string;
+    };
+    indexes: { "by-username": string };
+  };
 }
 
 // Kategori veri cursor'ını işleyecek yardımcı fonksiyon
@@ -115,7 +164,7 @@ async function processCategoryCursor(cursor: any): Promise<void> {
 }
 
 // Veritabanını aç
-const dbPromise = openDB<PosDB>("pos-database", 2, {
+const dbPromise = openDB<PosDB>("pos-database", 3, {
   upgrade(db, oldVersion, newVersion) {
     // Veritabanı ilk kez oluşturuluyorsa
     if (oldVersion < 1) {
@@ -175,6 +224,48 @@ const dbPromise = openDB<PosDB>("pos-database", 2, {
         console.log("by-parent indeksi zaten mevcut olabilir");
       }
     }
+
+    // Version 3: İşlem logları, günlük ciro raporları ve kullanıcılar için tablolar ekleniyor
+    if (oldVersion < 3) {
+      // İşlem logları store
+      if (!db.objectStoreNames.contains("activityLogs")) {
+        const activityLogStore = db.createObjectStore("activityLogs", {
+          keyPath: "id",
+        });
+        activityLogStore.createIndex("by-date", "timestamp");
+        activityLogStore.createIndex("by-user", "userId");
+        activityLogStore.createIndex("by-table", "tableId");
+        activityLogStore.createIndex("by-order", "orderId");
+      }
+
+      // Günlük ciro raporları store
+      if (!db.objectStoreNames.contains("dailySalesReports")) {
+        const salesReportStore = db.createObjectStore("dailySalesReports", {
+          keyPath: "id",
+        });
+        salesReportStore.createIndex("by-date", "date");
+      }
+
+      // Kullanıcılar store
+      if (!db.objectStoreNames.contains("users")) {
+        const userStore = db.createObjectStore("users", {
+          keyPath: "id",
+        });
+        userStore.createIndex("by-username", "username");
+
+        // Varsayılan admin kullanıcısı oluştur
+        const adminUser = {
+          id: "admin-1",
+          username: "admin",
+          fullName: "Sistem Yöneticisi",
+          isAdmin: true,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+
+        userStore.add(adminUser);
+      }
+    }
   },
 
   // Veritabanı yükseltildikten sonra açılırken çalışacak kod
@@ -186,8 +277,7 @@ const dbPromise = openDB<PosDB>("pos-database", 2, {
   },
 });
 
-// Uygulama başlatıldığında mevcut kategorilerde parentId
-// özelliği yoksa ekler
+// Uygulama başlangıcında kategorilerdeki parentId alanını kontrol et
 async function ensureCategoryParentId() {
   try {
     const db = await dbPromise;
@@ -217,6 +307,9 @@ ensureCategoryParentId();
 // Veritabanı başlatma işlemi
 async function initializeDatabase() {
   try {
+    // Veritabanı bağlantısını aç ve kategori parentId kontrolü yap
+    await ensureCategoryParentId();
+
     const db = await dbPromise;
 
     // Kategorileri kontrol et
@@ -275,15 +368,15 @@ async function initializeDatabase() {
 
       logger.log("DATABASE_INIT", "Ürünler başarıyla yüklendi");
     }
+
+    console.log("Veritabanı başarıyla başlatıldı");
   } catch (error) {
     console.error("Veritabanı başlatılırken hata oluştu:", error);
     logger.log("DATABASE_ERROR", error);
   }
 }
 
-// Uygulama başlangıcında veritabanını başlat
-initializeDatabase();
-
+// Veritabanı işlemleri için ana obje
 const db = {
   // Kategori işlemleri
   categories: {
@@ -793,6 +886,197 @@ const db = {
       return newPayment;
     },
   },
+
+  // Kullanıcılar için işlemler
+  users: {
+    async getAll() {
+      const db = await dbPromise;
+      return db.getAll("users");
+    },
+
+    async getByUsername(username: string) {
+      const db = await dbPromise;
+      const idx = db.transaction("users").store.index("by-username");
+      return idx.get(username);
+    },
+
+    async get(id: string) {
+      const db = await dbPromise;
+      return db.get("users", id);
+    },
+
+    async add(
+      userData: Omit<PosDB["users"]["value"], "id" | "createdAt" | "updatedAt">
+    ) {
+      const db = await dbPromise;
+      const id = `user-${Date.now()}`;
+      const timestamp = new Date().toISOString();
+
+      const user = {
+        id,
+        ...userData,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+
+      await db.add("users", user);
+      return user;
+    },
+
+    async update(
+      id: string,
+      userData: Partial<
+        Omit<PosDB["users"]["value"], "id" | "createdAt" | "updatedAt">
+      >
+    ) {
+      const db = await dbPromise;
+      const user = await db.get("users", id);
+
+      if (!user) {
+        throw new Error(`Kullanıcı bulunamadı: ${id}`);
+      }
+
+      const updatedUser = {
+        ...user,
+        ...userData,
+        updatedAt: new Date().toISOString(),
+      };
+
+      await db.put("users", updatedUser);
+      return updatedUser;
+    },
+
+    async delete(id: string) {
+      const db = await dbPromise;
+      await db.delete("users", id);
+    },
+  },
+
+  // İşlem logları için işlemler
+  activityLogs: {
+    async getAll() {
+      const db = await dbPromise;
+      return db.getAll("activityLogs");
+    },
+
+    async getByDate(date: string) {
+      const db = await dbPromise;
+      const idx = db.transaction("activityLogs").store.index("by-date");
+      const range = IDBKeyRange.bound(
+        `${date}T00:00:00.000Z`,
+        `${date}T23:59:59.999Z`,
+        false,
+        false
+      );
+
+      return idx.getAll(range);
+    },
+
+    async add(
+      logData: Omit<PosDB["activityLogs"]["value"], "id" | "timestamp">
+    ) {
+      const db = await dbPromise;
+      const id = `log-${Date.now()}`;
+
+      const log = {
+        id,
+        timestamp: new Date().toISOString(),
+        ...logData,
+      };
+
+      await db.add("activityLogs", log);
+      return log;
+    },
+
+    async clear() {
+      const db = await dbPromise;
+      const tx = db.transaction("activityLogs", "readwrite");
+      await tx.objectStore("activityLogs").clear();
+      await tx.done;
+    },
+  },
+
+  // Günlük ciro raporları için işlemler
+  dailySalesReports: {
+    async getAll() {
+      const db = await dbPromise;
+      return db.getAll("dailySalesReports");
+    },
+
+    async getByDate(date: string) {
+      const db = await dbPromise;
+      const idx = db.transaction("dailySalesReports").store.index("by-date");
+      return idx.get(date);
+    },
+
+    async addOrUpdate(
+      reportData: Omit<
+        PosDB["dailySalesReports"]["value"],
+        "id" | "createdAt" | "updatedAt"
+      >
+    ) {
+      const db = await dbPromise;
+      const existingReport = await this.getByDate(reportData.date);
+      const timestamp = new Date().toISOString();
+
+      if (existingReport) {
+        const updatedReport = {
+          ...existingReport,
+          ...reportData,
+          updatedAt: timestamp,
+        };
+
+        await db.put("dailySalesReports", updatedReport);
+        return updatedReport;
+      } else {
+        const id = `report-${Date.now()}`;
+        const newReport = {
+          id,
+          ...reportData,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        };
+
+        await db.add("dailySalesReports", newReport);
+        return newReport;
+      }
+    },
+
+    async clear() {
+      const db = await dbPromise;
+      const tx = db.transaction("dailySalesReports", "readwrite");
+      await tx.objectStore("dailySalesReports").clear();
+      await tx.done;
+    },
+  },
 };
 
+// Kategori işlemleri için yardımcı objelerimiz
+const CategoryOperations = db.categories;
+const ProductOperations = db.products;
+const ProductVariantOperations = db.variants;
+const TableOperations = db.tables;
+const OrderOperations = db.orders;
+const OrderItemOperations = db.orderItems;
+const PaymentOperations = db.payments;
+const UserOperations = db.users;
+const ActivityLogOperations = db.activityLogs;
+const DailySalesReportOperations = db.dailySalesReports;
+
+// Objeleri export et
+export {
+  CategoryOperations,
+  ProductOperations,
+  ProductVariantOperations,
+  TableOperations,
+  OrderOperations,
+  OrderItemOperations,
+  PaymentOperations,
+  UserOperations,
+  ActivityLogOperations,
+  DailySalesReportOperations,
+  initializeDatabase,
+};
+
+// Veritabanı objesini export et
 export default db;

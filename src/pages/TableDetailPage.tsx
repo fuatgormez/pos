@@ -50,7 +50,9 @@ import {
   Category,
   Payment,
   PAYMENT_METHODS,
+  OPERATION_TYPES,
 } from "../models/types";
+import logger from "../utils/logger";
 
 // Toast mesajları için basit fonksiyonlar
 const toast = {
@@ -77,6 +79,7 @@ const TableDetailPage: React.FC = () => {
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [productVariants, setProductVariants] = useState<ProductVariant[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [paymentDialog, setPaymentDialog] = useState(false);
@@ -96,6 +99,10 @@ const TableDetailPage: React.FC = () => {
   const [currentDistributionId, setCurrentDistributionId] = useState<
     string | null
   >(null);
+  const [quantity, setQuantity] = useState(1);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [showVariantDialog, setShowVariantDialog] = useState(false);
+  const [payment, setPayment] = useState({ amount: 0, method: "cash" });
 
   useEffect(() => {
     if (tableId) {
@@ -265,116 +272,176 @@ const TableDetailPage: React.FC = () => {
     }
   };
 
-  const handleAddProduct = async (product: Product) => {
-    console.log("Ürün ekleme başlatılıyor:", product.name);
-
-    // Aktif sipariş yoksa önce yeni sipariş oluştur
-    if (!activeOrder) {
-      console.log("Aktif sipariş yok, yeni sipariş oluşturuluyor");
-      try {
-        // Önce mevcut durumu kontrol et
-        await loadTableData();
-
-        // Tekrar kontrol et, belki veritabanında sipariş vardı
-        if (activeOrder) {
-          console.log("Aktif sipariş zaten varmış, yeni oluşturmuyoruz");
-        } else {
+  const handleAddProduct = async (
+    product: Product,
+    quantity: number = 1,
+    variantId?: string | null
+  ) => {
+    try {
+      setLoading(true);
+      // Aktif sipariş kontrol et, yoksa oluştur
+      if (!activeOrder) {
+        console.log("Aktif sipariş bulunamadı, yeni sipariş oluşturuluyor...");
+        try {
           // Yeni sipariş oluştur
           const newOrder = await handleCreateOrder();
-
-          if (!newOrder) {
-            toast.error("Sipariş oluşturulamadı, lütfen tekrar deneyin");
-            return;
-          }
-
-          // Yeni siparişi aktif hale getir
+          console.log("Yeni sipariş oluşturuldu:", newOrder);
           setActiveOrder(newOrder);
 
-          // Veritabanı işlemlerinin tamamlanması için daha uzun bir bekleme
-          await new Promise((resolve) => setTimeout(resolve, 500));
+          // Masa bilgisini güncelle
+          const updatedTable = await db.tables.update(tableId || "", {
+            status: "occupied",
+          });
+          setTable(updatedTable || undefined);
 
-          // Güncel durumu yükle
-          await loadTableData();
+          // Bekleme süresi ekle
+          await new Promise((resolve) => setTimeout(resolve, 100));
 
-          // Son bir kontrol daha yap
-          if (!activeOrder) {
-            console.log(
-              "Sipariş oluşturuldu ama activeOrder hala null, manuel olarak ayarlanıyor"
+          // Ürün ekle
+          if (newOrder) {
+            const orderItem = await db.orderItems.add({
+              orderId: newOrder.id,
+              productId: product.id,
+              variantId: variantId || null,
+              quantity,
+              price: variantId
+                ? productVariants.find((v) => v.id === variantId)?.price ||
+                  product.price
+                : product.price,
+              assignedTo: null,
+              status: "active",
+            });
+
+            console.log("Ürün siparişe eklendi:", orderItem);
+
+            // Log ekle
+            logger.log(
+              OPERATION_TYPES.PRODUCT_ADD,
+              {
+                product: { id: product.id, name: product.name },
+                quantity,
+                price: orderItem.price,
+                variantId,
+              },
+              { tableId, orderId: newOrder.id }
             );
-            setActiveOrder(newOrder);
-            // Bir bekleme daha
-            await new Promise((resolve) => setTimeout(resolve, 300));
           }
+
+          // Siparişleri yenile
+          await loadTableData();
+        } catch (error) {
+          console.error("Sipariş oluşturma ve ürün ekleme hatası:", error);
+          toast.error("Sipariş oluşturulamadı!");
         }
-      } catch (createError) {
-        console.error("Sipariş oluşturulurken hata:", createError);
-        toast.error("Sipariş oluşturulamadı, lütfen tekrar deneyin");
-        return;
-      }
-    }
-
-    // Yine kontrol et, eğer hala aktif sipariş yoksa çık
-    if (!activeOrder) {
-      console.error("Sipariş oluşturuldu ama activeOrder değeri atanmadı");
-      toast.error("Sipariş oluşturulamadı, sayfayı yenileyin");
-      return;
-    }
-
-    try {
-      console.log(
-        `Ürün ekleniyor: ${product.name}, Sipariş ID: ${activeOrder.id}`
-      );
-
-      // Variantları olan ürünleri kontrol et ve işle
-      const variants = await db.variants.getByProduct(product.id);
-
-      if (variants.length > 0) {
-        // Popup göstermeden ilk varyantı kullan
-        await addOrderItem(product, variants[0]);
       } else {
-        // Varyantı olmayan normal ürün
-        await addOrderItem(product);
-      }
+        console.log("Mevcut siparişe ürün ekleniyor...");
+        try {
+          // Mevcut siparişe ürün ekle
+          const orderItem = await db.orderItems.add({
+            orderId: activeOrder.id,
+            productId: product.id,
+            variantId: variantId || null,
+            quantity,
+            price: variantId
+              ? productVariants.find((v) => v.id === variantId)?.price ||
+                product.price
+              : product.price,
+            assignedTo: null,
+            status: "active",
+          });
+          console.log("Ürün siparişe eklendi:", orderItem);
 
-      // Verileri sessizce yeniden yükle
-      await loadTableData();
+          // Log ekle
+          logger.log(
+            OPERATION_TYPES.PRODUCT_ADD,
+            {
+              product: { id: product.id, name: product.name },
+              quantity,
+              price: orderItem.price,
+              variantId,
+            },
+            { tableId, orderId: activeOrder.id }
+          );
+
+          // Siparişleri yenile
+          await loadTableData();
+        } catch (error) {
+          console.error("Ürün ekleme hatası:", error);
+          toast.error("Ürün eklenemedi!");
+        }
+      }
+      setQuantity(1);
+      setSelectedProduct(null);
+      setShowVariantDialog(false);
     } catch (error) {
-      console.error("Ürün eklenirken hata oluştu:", error);
-      toast.error("Ürün eklenirken bir hata oluştu");
+      console.error("Genel hata:", error);
+      toast.error("İşlem sırasında bir hata oluştu!");
+    } finally {
+      setLoading(false);
     }
   };
 
-  const addOrderItem = async (product: Product, variant?: ProductVariant) => {
-    if (!activeOrder) {
-      console.error("Ürün eklenemiyor: Aktif sipariş bulunamadı");
-      throw new Error("Aktif sipariş bulunamadı");
-    }
-
+  const handleRemoveItem = async (item: OrderItem) => {
     try {
-      console.log(`Aktif sipariş kontrolü: ${activeOrder.id}`);
+      setLoading(true);
+      await db.orderItems.cancel(item.id);
 
-      const orderItem: Omit<OrderItem, "id" | "createdAt" | "updatedAt"> = {
-        orderId: activeOrder.id,
-        productId: product.id,
-        variantId: variant ? variant.id : null,
-        quantity: 1,
-        price: variant ? variant.price : product.price,
-        assignedTo: null,
-        status: "active",
-      };
+      // Log ekle
+      logger.log(
+        OPERATION_TYPES.PRODUCT_REMOVE,
+        {
+          orderItem: item,
+        },
+        { tableId, orderId: item.orderId }
+      );
 
-      console.log(`Siparişe ürün ekleniyor:`, orderItem);
-      const newItem = await db.orderItems.add(orderItem);
-      console.log(`Ürün başarıyla eklendi: ${newItem.id}`);
-      return newItem;
+      // Siparişleri yenile
+      await loadTableData();
+
+      // Eğer sipariş içinde ürün kalmadıysa masalar sayfasına yönlendir
+      const remainingItems = orderItems.filter(
+        (i) => i.id !== item.id && i.status === "active"
+      );
+      if (remainingItems.length === 0) {
+        navigate("/tables");
+      }
     } catch (error) {
-      console.error("Sipariş öğesi eklenirken hata:", error);
-      console.error("Hata detayları:", {
-        orderId: activeOrder?.id,
-        productId: product.id,
-        variantId: variant?.id || null,
-      });
-      throw error;
+      console.error("Ürün kaldırma hatası:", error);
+      toast.error("Ürün kaldırılamadı!");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCompleteItem = async (item: OrderItem) => {
+    try {
+      setLoading(true);
+      await db.orderItems.complete(item.id);
+
+      // Log ekle
+      logger.log(
+        OPERATION_TYPES.ORDER_COMPLETE,
+        {
+          orderItem: item,
+        },
+        { tableId, orderId: item.orderId }
+      );
+
+      // Siparişleri yenile
+      await loadTableData();
+
+      // Eğer sipariş içinde ürün kalmadıysa masalar sayfasına yönlendir
+      const remainingItems = orderItems.filter(
+        (i) => i.id !== item.id && i.status === "active"
+      );
+      if (remainingItems.length === 0) {
+        navigate("/tables");
+      }
+    } catch (error) {
+      console.error("Ürün tamamlama hatası:", error);
+      toast.error("Ürün tamamlanamadı!");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -419,44 +486,6 @@ const TableDetailPage: React.FC = () => {
     }
   };
 
-  const handleRemoveItem = async (itemId: string) => {
-    try {
-      await db.orderItems.cancel(itemId);
-      await loadTableData();
-
-      // Masada kalan ürün var mı kontrol et
-      const remainingItems = orderItems.filter(
-        (item) => item.id !== itemId && item.status === "active"
-      );
-
-      // Eğer son ürün kaldırıldıysa masalar sayfasına yönlendir
-      if (remainingItems.length === 0 && activeOrder) {
-        try {
-          console.log("Son ürün kaldırıldı, sipariş kapatılıyor");
-          await db.orders.complete(activeOrder.id);
-
-          // Masa durumunu doğrudan güncelle
-          if (table) {
-            console.log("Masa durumu manuel olarak güncelleniyor:", table.id);
-            try {
-              await db.tables.update(table.id, { status: "available" });
-              console.log("Masa boş durumuna getirildi:", table.id);
-            } catch (tableError) {
-              console.error("Masa durumu güncellenirken hata:", tableError);
-            }
-          }
-
-          // Masalar sayfasına yönlendir
-          navigate("/tables");
-        } catch (error) {
-          console.error("Sipariş tamamlanırken hata:", error);
-        }
-      }
-    } catch (error) {
-      console.error("Ürün kaldırılırken hata oluştu:", error);
-    }
-  };
-
   const handleMenuClick = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
   };
@@ -474,10 +503,22 @@ const TableDetailPage: React.FC = () => {
   };
 
   const handleOpenPaymentDialog = () => {
-    // Genel ödeme için tüm aktif ürünlerin toplamını kullan
-    const total = calculateTotalAll();
-    setPaymentAmount(total.toFixed(2));
-    setPaymentDialog(true);
+    // Siparişte aktif öğe var mı kontrol et
+    const hasActiveItems = orderItems.some((item) => item.status === "active");
+
+    if (hasActiveItems) {
+      // Toplam tutarı hesapla (dağıtımdaki ürünler dahil)
+      const totalAmount = calculateTotalAll();
+
+      setPayment({
+        amount: totalAmount,
+        method: "cash",
+      });
+      setPaymentAmount(totalAmount.toFixed(2));
+      setPaymentDialog(true);
+    } else {
+      toast.error("Ödenecek aktif ürün bulunmamaktadır!");
+    }
   };
 
   const handleClosePaymentDialog = () => {
@@ -651,44 +692,6 @@ const TableDetailPage: React.FC = () => {
       }
     } catch (error) {
       console.error("Ürün masaya geri gönderilirken hata oluştu:", error);
-    }
-  };
-
-  const handleCompleteItem = async (itemId: string) => {
-    try {
-      await db.orderItems.complete(itemId);
-      await loadTableData();
-
-      // Masada kalan aktif ürün var mı kontrol et
-      const remainingItems = orderItems.filter(
-        (item) => item.id !== itemId && item.status === "active"
-      );
-
-      // Eğer son ürün tamamlandıysa masalar sayfasına yönlendir
-      if (remainingItems.length === 0 && activeOrder) {
-        try {
-          console.log("Son ürün tamamlandı, sipariş kapatılıyor");
-          await db.orders.complete(activeOrder.id);
-
-          // Masa durumunu doğrudan güncelle
-          if (table) {
-            console.log("Masa durumu manuel olarak güncelleniyor:", table.id);
-            try {
-              await db.tables.update(table.id, { status: "available" });
-              console.log("Masa boş durumuna getirildi:", table.id);
-            } catch (tableError) {
-              console.error("Masa durumu güncellenirken hata:", tableError);
-            }
-          }
-
-          // Masalar sayfasına yönlendir
-          navigate("/tables");
-        } catch (error) {
-          console.error("Sipariş tamamlanırken hata:", error);
-        }
-      }
-    } catch (error) {
-      console.error("Ürün tamamlanırken hata oluştu:", error);
     }
   };
 
@@ -1086,7 +1089,7 @@ const TableDetailPage: React.FC = () => {
                                   color="error"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    handleRemoveItem(item.id);
+                                    handleRemoveItem(item);
                                   }}
                                 >
                                   <RemoveCircleIcon />

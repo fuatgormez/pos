@@ -59,12 +59,11 @@ const toast = {
     options?: { autoClose?: number; hideProgressBar?: boolean }
   ) => {
     console.log("Başarılı:", message);
-    // Burada gerçek bir toast kütüphanesi kullanılabilir
-    alert("✅ " + message);
+    // Popup göstermeyi kaldırdık, sadece konsola loglama yapılıyor
   },
   error: (message: string) => {
     console.error("Hata:", message);
-    // Burada gerçek bir toast kütüphanesi kullanılabilir
+    // Kritik hatalar için alert kullanmaya devam ediyoruz
     alert("❌ " + message);
   },
 };
@@ -232,6 +231,8 @@ const TableDetailPage: React.FC = () => {
       console.log(`Masa ${tableId} için yeni sipariş oluşturuluyor`);
       const newOrder = await db.orders.create(tableId);
       console.log(`Yeni sipariş oluşturuldu:`, newOrder);
+
+      // Doğrudan aktif siparişi ayarla
       setActiveOrder(newOrder);
 
       // Masayı "occupied" olarak işaretle
@@ -255,8 +256,20 @@ const TableDetailPage: React.FC = () => {
     if (!activeOrder) {
       console.log("Aktif sipariş yok, yeni sipariş oluşturuluyor");
       try {
-        await handleCreateOrder();
-        // Sipariş oluşturulduktan sonra activeOrder değerini güncellemek için bir kere daha yükle
+        const newOrder = await handleCreateOrder();
+
+        if (!newOrder) {
+          toast.error("Sipariş oluşturulamadı, lütfen tekrar deneyin");
+          return;
+        }
+
+        // Yeni siparişi aktif hale getir
+        setActiveOrder(newOrder);
+
+        // Veritabanı işlemlerinin tamamlanması için kısa bir bekleme
+        await new Promise((resolve) => setTimeout(resolve, 300));
+
+        // Güncel durumu yükle
         await loadTableData();
       } catch (createError) {
         console.error("Sipariş oluşturulurken hata:", createError);
@@ -281,21 +294,17 @@ const TableDetailPage: React.FC = () => {
       const variants = await db.variants.getByProduct(product.id);
 
       if (variants.length > 0) {
-        // Varyant seçimi için dialog aç
-        // Bu kısım gerçek uygulamada eklenecek
-        // Şimdilik ilk varyantı ekleyelim
+        // Popup göstermeden ilk varyantı kullan
         await addOrderItem(product, variants[0]);
+        // Başarı mesajı göstermiyoruz
       } else {
         // Varyantı olmayan normal ürün
         await addOrderItem(product);
+        // Başarı mesajı göstermiyoruz
       }
 
-      // Verileri yeniden yükle
+      // Verileri sessizce yeniden yükle
       await loadTableData();
-      toast.success(`${product.name} eklendi`, {
-        autoClose: 1000,
-        hideProgressBar: true,
-      });
     } catch (error) {
       console.error("Ürün eklenirken hata oluştu:", error);
       toast.error("Ürün eklenirken bir hata oluştu");
@@ -305,10 +314,12 @@ const TableDetailPage: React.FC = () => {
   const addOrderItem = async (product: Product, variant?: ProductVariant) => {
     if (!activeOrder) {
       console.error("Ürün eklenemiyor: Aktif sipariş bulunamadı");
-      return;
+      throw new Error("Aktif sipariş bulunamadı");
     }
 
     try {
+      console.log(`Aktif sipariş kontrolü: ${activeOrder.id}`);
+
       const orderItem: Omit<OrderItem, "id" | "createdAt" | "updatedAt"> = {
         orderId: activeOrder.id,
         productId: product.id,
@@ -325,6 +336,11 @@ const TableDetailPage: React.FC = () => {
       return newItem;
     } catch (error) {
       console.error("Sipariş öğesi eklenirken hata:", error);
+      console.error("Hata detayları:", {
+        orderId: activeOrder?.id,
+        productId: product.id,
+        variantId: variant?.id || null,
+      });
       throw error;
     }
   };
@@ -374,6 +390,35 @@ const TableDetailPage: React.FC = () => {
     try {
       await db.orderItems.cancel(itemId);
       await loadTableData();
+
+      // Masada kalan ürün var mı kontrol et
+      const remainingItems = orderItems.filter(
+        (item) => item.id !== itemId && item.status === "active"
+      );
+
+      // Eğer son ürün kaldırıldıysa masalar sayfasına yönlendir
+      if (remainingItems.length === 0 && activeOrder) {
+        try {
+          console.log("Son ürün kaldırıldı, sipariş kapatılıyor");
+          await db.orders.complete(activeOrder.id);
+
+          // Masa durumunu doğrudan güncelle
+          if (table) {
+            console.log("Masa durumu manuel olarak güncelleniyor:", table.id);
+            try {
+              await db.tables.update(table.id, { status: "available" });
+              console.log("Masa boş durumuna getirildi:", table.id);
+            } catch (tableError) {
+              console.error("Masa durumu güncellenirken hata:", tableError);
+            }
+          }
+
+          // Masalar sayfasına yönlendir
+          navigate("/tables");
+        } catch (error) {
+          console.error("Sipariş tamamlanırken hata:", error);
+        }
+      }
     } catch (error) {
       console.error("Ürün kaldırılırken hata oluştu:", error);
     }
@@ -542,6 +587,34 @@ const TableDetailPage: React.FC = () => {
       }
 
       await loadTableData();
+
+      // Tüm masada hiç aktif ürün kalmadıysa masalar sayfasına yönlendir
+      const allActiveItems = orderItems.filter(
+        (item) => item.status === "active" && item.id !== itemId
+      );
+
+      if (allActiveItems.length === 0 && activeOrder) {
+        try {
+          console.log("Masada aktif ürün kalmadı, sipariş kapatılıyor");
+          await db.orders.complete(activeOrder.id);
+
+          // Masa durumunu doğrudan güncelle
+          if (table) {
+            console.log("Masa durumu manuel olarak güncelleniyor:", table.id);
+            try {
+              await db.tables.update(table.id, { status: "available" });
+              console.log("Masa boş durumuna getirildi:", table.id);
+            } catch (tableError) {
+              console.error("Masa durumu güncellenirken hata:", tableError);
+            }
+          }
+
+          // Masalar sayfasına yönlendir
+          navigate("/tables");
+        } catch (error) {
+          console.error("Sipariş tamamlanırken hata:", error);
+        }
+      }
     } catch (error) {
       console.error("Ürün masaya geri gönderilirken hata oluştu:", error);
     }
@@ -551,6 +624,35 @@ const TableDetailPage: React.FC = () => {
     try {
       await db.orderItems.complete(itemId);
       await loadTableData();
+
+      // Masada kalan aktif ürün var mı kontrol et
+      const remainingItems = orderItems.filter(
+        (item) => item.id !== itemId && item.status === "active"
+      );
+
+      // Eğer son ürün tamamlandıysa masalar sayfasına yönlendir
+      if (remainingItems.length === 0 && activeOrder) {
+        try {
+          console.log("Son ürün tamamlandı, sipariş kapatılıyor");
+          await db.orders.complete(activeOrder.id);
+
+          // Masa durumunu doğrudan güncelle
+          if (table) {
+            console.log("Masa durumu manuel olarak güncelleniyor:", table.id);
+            try {
+              await db.tables.update(table.id, { status: "available" });
+              console.log("Masa boş durumuna getirildi:", table.id);
+            } catch (tableError) {
+              console.error("Masa durumu güncellenirken hata:", tableError);
+            }
+          }
+
+          // Masalar sayfasına yönlendir
+          navigate("/tables");
+        } catch (error) {
+          console.error("Sipariş tamamlanırken hata:", error);
+        }
+      }
     } catch (error) {
       console.error("Ürün tamamlanırken hata oluştu:", error);
     }
@@ -736,13 +838,19 @@ const TableDetailPage: React.FC = () => {
       // Verileri yenile
       await loadTableData();
 
-      // Başarı bildirimi toast.success ile gösterilir
-      toast.success("Ürün dağıtıma eklendi", {
-        autoClose: 1000, // 1 saniye sonra otomatik kapanacak
-        hideProgressBar: true,
-      });
+      // Masada kalan başka aktif ürün var mı kontrol et
+      const remainingItems = orderItems.filter(
+        (item) =>
+          item.id !== itemId && item.status === "active" && !item.assignedTo
+      );
+
+      // Eğer masada hiç ürün kalmadıysa sipariş tamamlanmayacak, sadece dağıtım gösterilecek
+      // Bu sebeple masalar sayfasına yönlendirmiyoruz, kullanıcı dağıtımdaki ürünleri işleyebilmeli
+
+      // Toast bildirimi kaldırıldı
     } catch (error) {
       console.error("Ürün dağıtıma gönderilirken hata oluştu:", error);
+      // Sadece hata durumunda bildirim göster
       toast.error("Ürün dağıtıma gönderilemedi");
     }
   };

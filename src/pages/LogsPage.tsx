@@ -30,6 +30,10 @@ import RefreshIcon from "@mui/icons-material/Refresh";
 import MonetizationOnIcon from "@mui/icons-material/MonetizationOn";
 import PersonIcon from "@mui/icons-material/Person";
 import LocalDiningIcon from "@mui/icons-material/LocalDining";
+import FileDownloadIcon from "@mui/icons-material/FileDownload";
+import TableViewIcon from "@mui/icons-material/TableView";
+import ReceiptIcon from "@mui/icons-material/Receipt";
+import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
 import logger from "../utils/logger";
 import Layout from "../components/Layout";
 import { ActivityLog, DailySalesReport } from "../models/types";
@@ -68,6 +72,10 @@ const LogsPage: React.FC = () => {
   );
   const [filterOperation, setFilterOperation] = useState<string>("all");
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const [selectedTableId, setSelectedTableId] = useState<string>("");
+  const [selectedOrderId, setSelectedOrderId] = useState<string>("");
+  const [tableLogs, setTableLogs] = useState<ActivityLog[]>([]);
+  const [orderLogs, setOrderLogs] = useState<ActivityLog[]>([]);
 
   // Admin kontrolü
   useEffect(() => {
@@ -129,6 +137,32 @@ const LogsPage: React.FC = () => {
     }
   };
 
+  // Masa loglarını yükle
+  const loadTableLogs = () => {
+    if (filterDate && selectedTableId) {
+      try {
+        const logs = logger.getFileLogsByTable(filterDate, selectedTableId);
+        setTableLogs(logs);
+      } catch (error) {
+        console.error("Masa logları yüklenirken hata:", error);
+        setTableLogs([]);
+      }
+    }
+  };
+
+  // Sipariş loglarını yükle
+  const loadOrderLogs = () => {
+    if (filterDate && selectedOrderId) {
+      try {
+        const logs = logger.getFileLogsByOrder(filterDate, selectedOrderId);
+        setOrderLogs(logs);
+      } catch (error) {
+        console.error("Sipariş logları yüklenirken hata:", error);
+        setOrderLogs([]);
+      }
+    }
+  };
+
   // Sayfa yüklendiğinde logları ve raporları getir
   useEffect(() => {
     if (!isAdmin) {
@@ -147,6 +181,19 @@ const LogsPage: React.FC = () => {
       loadLogs();
     }
   }, [filterDate, filterOperation, isAdmin]);
+
+  // Masa veya sipariş seçildiğinde logları yükle
+  useEffect(() => {
+    if (selectedTableId) {
+      loadTableLogs();
+    }
+  }, [selectedTableId, filterDate]);
+
+  useEffect(() => {
+    if (selectedOrderId) {
+      loadOrderLogs();
+    }
+  }, [selectedOrderId, filterDate]);
 
   // Tab değişikliği
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
@@ -190,6 +237,26 @@ const LogsPage: React.FC = () => {
     setFilterOperation(event.target.value);
   };
 
+  // Masa ID değişikliği
+  const handleTableIdChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSelectedTableId(event.target.value);
+  };
+
+  // Sipariş ID değişikliği
+  const handleOrderIdChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSelectedOrderId(event.target.value);
+  };
+
+  // Logları dışa aktar
+  const handleExportLogs = () => {
+    logger.exportLogsByDate(filterDate);
+  };
+
+  // Tüm logları dışa aktar
+  const handleExportAllLogs = () => {
+    logger.exportAllLogs();
+  };
+
   // Admin olmayan kullanıcılar için erişimi engelle
   if (!isAdmin) {
     return null; // navigate zaten ana sayfaya yönlendiriyor
@@ -217,6 +284,8 @@ const LogsPage: React.FC = () => {
               value={activeTab}
               onChange={handleTabChange}
               aria-label="logs tabs"
+              variant="scrollable"
+              scrollButtons="auto"
             >
               <Tab
                 label="İşlem Günlükleri"
@@ -226,6 +295,16 @@ const LogsPage: React.FC = () => {
               <Tab
                 label="Günlük Cirolar"
                 icon={<MonetizationOnIcon />}
+                iconPosition="start"
+              />
+              <Tab
+                label="Masa Logları"
+                icon={<TableViewIcon />}
+                iconPosition="start"
+              />
+              <Tab
+                label="Sipariş Logları"
+                icon={<ReceiptIcon />}
                 iconPosition="start"
               />
               <Tab
@@ -292,6 +371,13 @@ const LogsPage: React.FC = () => {
                   title="Yenile"
                 >
                   <RefreshIcon />
+                </IconButton>
+                <IconButton
+                  color="success"
+                  onClick={handleExportLogs}
+                  title="Logları Dışa Aktar"
+                >
+                  <FileDownloadIcon />
                 </IconButton>
                 <IconButton
                   color="error"
@@ -500,8 +586,196 @@ const LogsPage: React.FC = () => {
             )}
           </TabPanel>
 
-          {/* Kullanıcılar Tab */}
+          {/* Masa Logları Tab */}
           <TabPanel value={activeTab} index={2}>
+            <Box
+              sx={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                mb: 2,
+              }}
+            >
+              <Typography variant="h6">Masa Logları</Typography>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+                <TextField
+                  label="Tarih Seç"
+                  type="date"
+                  value={filterDate}
+                  onChange={handleDateChange}
+                  size="small"
+                  InputLabelProps={{
+                    shrink: true,
+                  }}
+                />
+                <TextField
+                  label="Masa ID"
+                  value={selectedTableId}
+                  onChange={handleTableIdChange}
+                  size="small"
+                  placeholder="Masa ID'sini girin"
+                />
+                <Button
+                  variant="contained"
+                  startIcon={<RefreshIcon />}
+                  onClick={loadTableLogs}
+                >
+                  Yükle
+                </Button>
+              </Box>
+            </Box>
+
+            <Paper elevation={3} sx={{ p: 2 }}>
+              {!selectedTableId ? (
+                <Alert severity="info">
+                  Lütfen görüntülemek istediğiniz masanın ID'sini girin.
+                </Alert>
+              ) : tableLogs.length === 0 ? (
+                <Typography variant="body1" sx={{ textAlign: "center", py: 4 }}>
+                  Seçilen tarih ve masa için log kaydı bulunmamaktadır.
+                </Typography>
+              ) : (
+                <TableContainer component={Paper} sx={{ maxHeight: 500 }}>
+                  <Table stickyHeader>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Zaman</TableCell>
+                        <TableCell>Kullanıcı</TableCell>
+                        <TableCell>İşlem</TableCell>
+                        <TableCell>Sipariş ID</TableCell>
+                        <TableCell>Detaylar</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {tableLogs.map((log) => (
+                        <TableRow key={log.id}>
+                          <TableCell>
+                            {new Date(log.timestamp).toLocaleTimeString()}
+                          </TableCell>
+                          <TableCell>{log.userName}</TableCell>
+                          <TableCell>{log.operation}</TableCell>
+                          <TableCell>{log.orderId || "-"}</TableCell>
+                          <TableCell>
+                            <Typography
+                              component="pre"
+                              variant="body2"
+                              sx={{
+                                whiteSpace: "pre-wrap",
+                                wordBreak: "break-word",
+                                fontSize: "0.75rem",
+                                maxWidth: 400,
+                                maxHeight: 100,
+                                overflow: "auto",
+                              }}
+                            >
+                              {JSON.stringify(log.details, null, 2)}
+                            </Typography>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              )}
+            </Paper>
+          </TabPanel>
+
+          {/* Sipariş Logları Tab */}
+          <TabPanel value={activeTab} index={3}>
+            <Box
+              sx={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                mb: 2,
+              }}
+            >
+              <Typography variant="h6">Sipariş Logları</Typography>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+                <TextField
+                  label="Tarih Seç"
+                  type="date"
+                  value={filterDate}
+                  onChange={handleDateChange}
+                  size="small"
+                  InputLabelProps={{
+                    shrink: true,
+                  }}
+                />
+                <TextField
+                  label="Sipariş ID"
+                  value={selectedOrderId}
+                  onChange={handleOrderIdChange}
+                  size="small"
+                  placeholder="Sipariş ID'sini girin"
+                />
+                <Button
+                  variant="contained"
+                  startIcon={<RefreshIcon />}
+                  onClick={loadOrderLogs}
+                >
+                  Yükle
+                </Button>
+              </Box>
+            </Box>
+
+            <Paper elevation={3} sx={{ p: 2 }}>
+              {!selectedOrderId ? (
+                <Alert severity="info">
+                  Lütfen görüntülemek istediğiniz siparişin ID'sini girin.
+                </Alert>
+              ) : orderLogs.length === 0 ? (
+                <Typography variant="body1" sx={{ textAlign: "center", py: 4 }}>
+                  Seçilen tarih ve sipariş için log kaydı bulunmamaktadır.
+                </Typography>
+              ) : (
+                <TableContainer component={Paper} sx={{ maxHeight: 500 }}>
+                  <Table stickyHeader>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Zaman</TableCell>
+                        <TableCell>Kullanıcı</TableCell>
+                        <TableCell>İşlem</TableCell>
+                        <TableCell>Masa ID</TableCell>
+                        <TableCell>Detaylar</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {orderLogs.map((log) => (
+                        <TableRow key={log.id}>
+                          <TableCell>
+                            {new Date(log.timestamp).toLocaleTimeString()}
+                          </TableCell>
+                          <TableCell>{log.userName}</TableCell>
+                          <TableCell>{log.operation}</TableCell>
+                          <TableCell>{log.tableId || "-"}</TableCell>
+                          <TableCell>
+                            <Typography
+                              component="pre"
+                              variant="body2"
+                              sx={{
+                                whiteSpace: "pre-wrap",
+                                wordBreak: "break-word",
+                                fontSize: "0.75rem",
+                                maxWidth: 400,
+                                maxHeight: 100,
+                                overflow: "auto",
+                              }}
+                            >
+                              {JSON.stringify(log.details, null, 2)}
+                            </Typography>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              )}
+            </Paper>
+          </TabPanel>
+
+          {/* Kullanıcılar Tab */}
+          <TabPanel value={activeTab} index={4}>
             <Box sx={{ mb: 2 }}>
               <Typography variant="h6">Kullanıcı Yönetimi</Typography>
               <Typography variant="body2" color="text.secondary">
@@ -514,6 +788,18 @@ const LogsPage: React.FC = () => {
               mevcut admin kullanıcılar raporları görüntüleyebilir.
             </Alert>
           </TabPanel>
+
+          {/* Tüm Logları Dışa Aktarma Butonu */}
+          <Box sx={{ mt: 4, display: "flex", justifyContent: "center" }}>
+            <Button
+              variant="contained"
+              color="primary"
+              startIcon={<FileDownloadIcon />}
+              onClick={handleExportAllLogs}
+            >
+              Tüm Log Dosyalarını İndir
+            </Button>
+          </Box>
         </Box>
       </Container>
     </Layout>

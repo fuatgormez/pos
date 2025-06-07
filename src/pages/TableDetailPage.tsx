@@ -110,36 +110,79 @@ const TableDetailPage: React.FC = () => {
     }
   }, [tableId]);
 
+  // Component unmount olduğunda masa durumunu kontrol et
+  useEffect(() => {
+    return () => {
+      // Component unmount olduğunda çalışacak cleanup fonksiyonu
+      const checkTableStatus = async () => {
+        if (table && tableId) {
+          // Masanın güncel durumunu al
+          const currentTable = await db.tables.get(tableId);
+          if (!currentTable) return;
+
+          // Aktif siparişi kontrol et
+          const activeOrders = await db.orders.getActiveByTable(tableId);
+          const hasActiveOrder = activeOrders.length > 0;
+
+          // Aktif siparişin içinde aktif ürün var mı kontrol et
+          let hasActiveItems = false;
+          if (hasActiveOrder) {
+            const items = await db.orderItems.getByOrder(activeOrders[0].id);
+            hasActiveItems = items.some((item) => item.status === "active");
+          }
+
+          // Eğer aktif sipariş yoksa veya sipariş var ama içinde aktif ürün yoksa masayı boş olarak işaretle
+          if (!hasActiveOrder || !hasActiveItems) {
+            console.log(
+              "Masadan çıkılıyor ve aktif ürün yok, masa durumu 'available' olarak güncelleniyor"
+            );
+            await db.tables.update(tableId, { status: "available" });
+          }
+        }
+      };
+
+      checkTableStatus().catch((error) => {
+        console.error("Masa durumu kontrol edilirken hata:", error);
+      });
+    };
+  }, [table, tableId]);
+
   // Siparişler eklendiğinde/değiştiğinde masa durumunu güncelle
   useEffect(() => {
     const updateTableStatus = async () => {
-      if (activeOrder && table && table.status !== "occupied") {
-        try {
+      if (!table) return;
+
+      try {
+        // Aktif sipariş ve içinde aktif ürün var mı kontrol et
+        const hasActiveItems = orderItems.some(
+          (item) => item.status === "active"
+        );
+
+        if (activeOrder && hasActiveItems && table.status !== "occupied") {
           // Masa durumunu güncelle
           console.log(
             `Masa durumu 'occupied' olarak güncelleniyor: ${table.id}`
           );
           await db.tables.update(table.id, { status: "occupied" });
           setTable({ ...table, status: "occupied" });
-        } catch (error) {
-          console.error("Masa durumu güncellenirken hata:", error);
-        }
-      } else if (!activeOrder && table && table.status === "occupied") {
-        try {
-          // Aktif sipariş yoksa masayı boş yap
+        } else if (
+          (!activeOrder || !hasActiveItems) &&
+          table.status === "occupied"
+        ) {
+          // Aktif sipariş yoksa veya sipariş var ama içinde aktif ürün yoksa masayı boş yap
           console.log(
             `Masa durumu 'available' olarak güncelleniyor: ${table.id}`
           );
           await db.tables.update(table.id, { status: "available" });
           setTable({ ...table, status: "available" });
-        } catch (error) {
-          console.error("Masa durumu güncellenirken hata:", error);
         }
+      } catch (error) {
+        console.error("Masa durumu güncellenirken hata:", error);
       }
     };
 
     updateTableStatus();
-  }, [activeOrder, table]);
+  }, [activeOrder, orderItems, table]);
 
   const loadTableData = async () => {
     if (!tableId) return;
@@ -155,16 +198,14 @@ const TableDetailPage: React.FC = () => {
       const currentOrder = activeOrders.length > 0 ? activeOrders[0] : null;
       setActiveOrder(currentOrder);
 
-      // Aktif siparişi varsa masa durumunu "occupied" olarak ayarla
-      if (currentOrder && tableData && tableData.status !== "occupied") {
-        await db.tables.update(tableId, { status: "occupied" });
-        tableData.status = "occupied";
-      }
-
       // Sipariş öğelerini al
+      let hasActiveItems = false;
       if (currentOrder) {
         const items = await db.orderItems.getByOrder(currentOrder.id);
         setOrderItems(items);
+
+        // Aktif ürün var mı kontrol et
+        hasActiveItems = items.some((item) => item.status === "active");
 
         // Dağıtımda aktif ürünler var mı kontrol et ve varsa dağıtım panelini aç
         const distributionItems = items.filter(
@@ -188,6 +229,21 @@ const TableDetailPage: React.FC = () => {
         setOrderItems([]);
         setShowDistribution(false);
         setCurrentDistributionId(null);
+      }
+
+      // Masa durumunu güncelle - aktif sipariş ve sipariş içinde aktif ürün varsa occupied, yoksa available olmalı
+      if (tableData) {
+        if (currentOrder && hasActiveItems) {
+          if (tableData.status !== "occupied") {
+            await db.tables.update(tableId, { status: "occupied" });
+            tableData.status = "occupied";
+          }
+        } else {
+          if (tableData.status !== "available") {
+            await db.tables.update(tableId, { status: "available" });
+            tableData.status = "available";
+          }
+        }
       }
 
       // Kategorileri yükle

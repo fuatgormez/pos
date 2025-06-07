@@ -1,0 +1,72 @@
+[
+  {
+    "id": "prod_1",
+    "name": "Weizenbrot",
+    "price": 2.5,
+    "categoryId": "cat_4",
+    "isWeighted": false
+  },
+  {
+    "id": "prod_2",
+    "name": "Vollkornbrot",
+    "price": 3.0,
+    "categoryId": "cat_4",
+    "isWeighted": false
+  },
+  {
+    "id": "prod_3",
+    "name": "Sesambrötchen",
+    "price": 1.2,
+    "categoryId": "cat_5",
+    "isWeighted": false
+  },
+  {
+    "id": "prod_4",
+    "name": "Käsebrötchen",
+    "price": 1.5,
+    "categoryId": "cat_5",
+    "isWeighted": false
+  },
+  {
+    "id": "prod_5",
+    "name": "Apfelkuchen",
+    "price": 2.8,
+    "categoryId": "cat_6",
+    "isWeighted": false
+  },
+  {
+    "id": "prod_6",
+    "name": "Schokoladenkuchen",
+    "price": 3.2,
+    "categoryId": "cat_6",
+    "isWeighted": false
+  },
+  {
+    "id": "prod_7",
+    "name": "Cola",
+    "price": 2.0,
+    "categoryId": "cat_7",
+    "isWeighted": false
+  },
+  {
+    "id": "prod_8",
+    "name": "Mineralwasser",
+    "price": 1.5,
+    "categoryId": "cat_7",
+    "isWeighted": false
+  },
+  {
+    "id": "prod_9",
+    "name": "Kaffee",
+    "price": 2.5,
+    "categoryId": "cat_8",
+    "isWeighted": false
+  },
+  {
+    "id": "prod_10",
+    "name": "Tee",
+    "price": 2.0,
+    "categoryId": "cat_8",
+    "isWeighted": false
+  }
+]

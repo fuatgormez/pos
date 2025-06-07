@@ -1,0 +1,12 @@
+[
+  { "id": "table_1", "name": "Masa 1", "status": "available" },
+  { "id": "table_2", "name": "Masa 2", "status": "available" },
+  { "id": "table_3", "name": "Masa 3", "status": "available" },
+  { "id": "table_4", "name": "Masa 4", "status": "available" },
+  { "id": "table_5", "name": "Masa 5", "status": "available" },
+  { "id": "table_6", "name": "Masa 6", "status": "available" },
+  { "id": "table_7", "name": "Masa 7", "status": "available" },
+  { "id": "table_8", "name": "Masa 8", "status": "available" },
+  { "id": "table_9", "name": "Masa 9", "status": "available" },
+  { "id": "table_10", "name": "Masa 10", "status": "available" }
+]

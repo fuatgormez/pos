@@ -1,0 +1,47 @@
+[
+  {
+    "id": "cat_1",
+    "name": "Backwaren",
+    "parentId": null
+  },
+  {
+    "id": "cat_2",
+    "name": "Getränke",
+    "parentId": null
+  },
+  {
+    "id": "cat_3",
+    "name": "Snacks",
+    "parentId": null
+  },
+  {
+    "id": "cat_4",
+    "name": "Brot",
+    "parentId": "cat_1"
+  },
+  {
+    "id": "cat_5",
+    "name": "Brötchen",
+    "parentId": "cat_1"
+  },
+  {
+    "id": "cat_6",
+    "name": "Kuchen",
+    "parentId": "cat_1"
+  },
+  {
+    "id": "cat_7",
+    "name": "Kalt",
+    "parentId": "cat_2"
+  },
+  {
+    "id": "cat_8",
+    "name": "Warm",
+    "parentId": "cat_2"
+  },
+  {
+    "id": "cat_9",
+    "name": "Alkohol",
+    "parentId": "cat_2"
+  }
+]
